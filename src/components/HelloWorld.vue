@@ -1,42 +1,138 @@
 <template>
   <div class="hello">
-    <h1>{{ msg }}</h1>
-    <p>
-      For a guide and recipes on how to configure / customize this project,<br>
-      check out the
-      <a href="https://cli.vuejs.org" target="_blank" rel="noopener">vue-cli documentation</a>.
-    </p>
-    <h3>Installed CLI Plugins</h3>
-    <ul>
-      <li><a href="https://github.com/vuejs/vue-cli/tree/dev/packages/%40vue/cli-plugin-babel" target="_blank" rel="noopener">babel</a></li>
-      <li><a href="https://github.com/vuejs/vue-cli/tree/dev/packages/%40vue/cli-plugin-eslint" target="_blank" rel="noopener">eslint</a></li>
-    </ul>
-    <h3>Essential Links</h3>
-    <ul>
-      <li><a href="https://vuejs.org" target="_blank" rel="noopener">Core Docs</a></li>
-      <li><a href="https://forum.vuejs.org" target="_blank" rel="noopener">Forum</a></li>
-      <li><a href="https://chat.vuejs.org" target="_blank" rel="noopener">Community Chat</a></li>
-      <li><a href="https://twitter.com/vuejs" target="_blank" rel="noopener">Twitter</a></li>
-      <li><a href="https://news.vuejs.org" target="_blank" rel="noopener">News</a></li>
-    </ul>
-    <h3>Ecosystem</h3>
-    <ul>
-      <li><a href="https://router.vuejs.org" target="_blank" rel="noopener">vue-router</a></li>
-      <li><a href="https://vuex.vuejs.org" target="_blank" rel="noopener">vuex</a></li>
-      <li><a href="https://github.com/vuejs/vue-devtools#vue-devtools" target="_blank" rel="noopener">vue-devtools</a></li>
-      <li><a href="https://vue-loader.vuejs.org" target="_blank" rel="noopener">vue-loader</a></li>
-      <li><a href="https://github.com/vuejs/awesome-vue" target="_blank" rel="noopener">awesome-vue</a></li>
-    </ul>
+    <b-form-input v-model="newTagName"></b-form-input>
+    <b-button variant="primary" @click="addNewTag(newTagName)">Submit</b-button>
+    <div class="tag-list">
+      <b-button-group v-for="tag in sortedTags" :key="tag">
+        <b-button>{{tag}}</b-button>
+        <b-button @click="(e) => deleteTag(tag)">X</b-button>
+      </b-button-group>
+    </div>
+
+    <NoteView :note="currentNote"></NoteView>
+
+    <b-button @click="handleEdit()">New Note</b-button>
+    <NoteEdit
+      :note="currentNote"
+      :tagTree="relationData"
+      @finishedEdit="(e)=>updateNote(e)"
+      @deleteNote="handleDelete()"
+      >
+    </NoteEdit>
+
+    <div class="d-flex note-container" v-for="note in sortedNotes" :key="note">
+      <div @click="handleView(notes[note])" class="btn btn-secondary w-100">
+        {{note}}
+      </div>
+      <b-button @click="handleEdit(notes[note])">Edit</b-button>
+    </div><br>
+
   </div>
 </template>
 
 <script>
+
+import {buildRelation as RelationBuilder} from 'scripts/tagRelationBuilder.js'
+import {deleteRelation as RelationDeleter} from 'scripts/tagRelationBuilder.js'
+import NoteView from 'components/NoteView.vue'
+import NoteEdit from 'components/NoteEdit.vue'
+
 export default {
   name: 'HelloWorld',
-  props: {
-    msg: String
+  mounted () {
+    // window.localStorage.clear()
+    if (window.localStorage.tagData == undefined){
+      window.localStorage.setItem('tagData', JSON.stringify({}))
+    } else {
+      this.relationData = JSON.parse(window.localStorage.getItem('tagData'))
+    }
+    if (window.localStorage.notes == undefined){
+      window.localStorage.setItem('notes', JSON.stringify({}))
+    } else {
+      this.notes = JSON.parse(window.localStorage.getItem('notes'))
+    }
+  },
+  data () {
+    return {
+      relationData: {},
+      notes: {},
+      newTagName: '',
+      currentNote: {}
+    }
+  },
+  computed: {
+    sortedTags () {
+      return Object.keys(this.relationData).sort()
+    },
+    sortedNotes () {
+      return Object.keys(this.notes).sort()
+    }
+  },
+  methods: {
+    addNewTag (string) {
+      if (!Object.prototype.hasOwnProperty.call(this.relationData, string)){
+        this.$set(this.relationData, string, {self:0, links:{}})
+        window.localStorage.setItem('tagData', JSON.stringify(this.relationData))
+      } else {
+        console.log('nah son')
+      }
+    },
+    deleteTag (tagName) {
+      for (let tag in this.relationData){
+        delete this.relationData[tag].links[tagName]
+      }
+      this.$delete(this.relationData, tagName)
+      for (let note in this.notes){
+        this.notes[note].tags = this.notes[note].tags.filter(tag => tag != tagName)
+      }
+      window.localStorage.setItem('tagData', JSON.stringify(this.relationData))
+      window.localStorage.setItem('notes', JSON.stringify(this.notes))
+    },
+    updateNote (note) {
+      if (this.notes[note.title]) {
+        let removedTags = this.notes[note.title].tags.filter(tag => !note.tags.includes(tag))
+        RelationDeleter(note.tags, this.relationData, removedTags)
+        this.relationData = Object.assign({}, this.relationData, RelationBuilder(note.tags, this.relationData, this.notes[note.title].tags))
+        // note.tags = this.notes[note.title].tags.concat(note.tags)
+      } else {
+        this.relationData = Object.assign({}, this.relationData, RelationBuilder(note.tags, this.relationData))
+      }
+      // console.log(note.tags)
+      this.$set(this.notes, note.title, note)
+      window.localStorage.setItem('notes', JSON.stringify(this.notes))
+      window.localStorage.setItem('tagData', JSON.stringify(this.relationData))
+
+    },
+    // updateRelationData (tagList, targetObject) {
+    //   let payload = RelationBuilder(tagList, targetObject)
+    //   window.localStorage.setItem('tagData', JSON.stringify(payload))
+    // },
+    handleEdit (data) {
+      this.$bvModal.show('note-edit')
+      if (!data){
+        this.currentNote = {title: 'New Note', body: '', tags: []}
+      } else {
+        this.currentNote = data
+      }
+    },
+    handleDelete () {
+      this.$delete(this.notes, this.currentNote.title)
+      this.relationData = Object.assign({}, this.relationData, RelationDeleter(this.currentNote.tags, this.relationData))
+      window.localStorage.setItem('notes', JSON.stringify(this.notes))
+      window.localStorage.setItem('tagData', JSON.stringify(this.relationData))
+    },
+    handleView (data) {
+      this.$bvModal.show('note-view')
+      this.currentNote = data
+    }
+  },
+  components: {
+    NoteView,
+    NoteEdit
   }
 }
+
+// Add a check for what changed between the origian version of tags and the submitted to know what relations to delete
 </script>
 
 <!-- Add "scoped" attribute to limit CSS to this component only -->
